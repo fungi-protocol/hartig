@@ -1,0 +1,16 @@
+[package]
+name = "hartig-server"
+version = "0.1.0"
+edition.workspace = true
+repository.workspace = true
+
+[dependencies]
+axum.workspace = true
+hartig-metrics = { path = "../metrics" }
+tokio.workspace = true
+
+[dev-dependencies]
+tower.workspace = true
+
+[lints]
+workspace = true

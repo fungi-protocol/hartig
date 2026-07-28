@@ -1,0 +1,19 @@
+[workspace]
+resolver = "3"
+members = ["crates/acme", "crates/hartig", "crates/metrics", "crates/server", "crates/tls"]
+
+[workspace.package]
+edition = "2024"
+repository = "https://github.com/fungi-protocol/hartig"
+
+[workspace.dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal"] }
+tower = { version = "0.5", features = ["util"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = "warn"
+pedantic = "warn"
