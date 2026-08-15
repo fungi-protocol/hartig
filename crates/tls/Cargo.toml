@@ -5,6 +5,12 @@ edition.workspace = true
 repository.workspace = true
 
 [dependencies]
+rustls.workspace = true
+rustls-pemfile.workspace = true
+tokio-rustls.workspace = true
+
+[dev-dependencies]
+rcgen = "0.13"
 
 [lints]
 workspace = true

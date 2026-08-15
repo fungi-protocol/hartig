@@ -12,6 +12,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = TcpListener::bind(address).await?;
     let state = ServerState::new(Arc::new(Metrics::default()));
 
-    hartig_server::serve(listener, state).await?;
+    match (
+        std::env::var_os("HARTIG_TLS_CERT"),
+        std::env::var_os("HARTIG_TLS_KEY"),
+    ) {
+        (Some(certificate), Some(private_key)) => {
+            let config = hartig_tls::server_config(certificate, private_key)?;
+            hartig_server::serve_tls(listener, state, hartig_tls::acceptor(config)).await?;
+        }
+        (None, None) => hartig_server::serve(listener, state).await?,
+        _ => return Err("HARTIG_TLS_CERT and HARTIG_TLS_KEY must be set together".into()),
+    }
     Ok(())
 }

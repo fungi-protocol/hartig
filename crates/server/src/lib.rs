@@ -2,7 +2,13 @@ use std::sync::Arc;
 
 use axum::{Router, extract::State, http::header, response::IntoResponse, routing::get};
 use hartig_metrics::Metrics;
+use hyper_util::{
+    rt::{TokioExecutor, TokioIo},
+    server::conn::auto::Builder,
+    service::TowerToHyperService,
+};
 use tokio::net::TcpListener;
+use tokio_rustls::TlsAcceptor;
 
 #[derive(Clone, Debug, Default)]
 pub struct ServerState {
@@ -30,6 +36,36 @@ pub fn router(state: ServerState) -> Router {
 /// Returns an I/O error when accepting or serving a connection fails.
 pub async fn serve(listener: TcpListener, state: ServerState) -> std::io::Result<()> {
     axum::serve(listener, router(state)).await
+}
+
+/// Serves HTTP/1.1 or HTTP/2 over TLS.
+///
+/// A failed handshake affects only that connection. Listener failures stop
+/// the server and are returned to the caller.
+///
+/// # Errors
+///
+/// Returns an I/O error when accepting a TCP connection fails.
+pub async fn serve_tls(
+    listener: TcpListener,
+    state: ServerState,
+    acceptor: TlsAcceptor,
+) -> std::io::Result<()> {
+    let router = router(state);
+    loop {
+        let (stream, _) = listener.accept().await?;
+        let acceptor = acceptor.clone();
+        let service = router.clone();
+        tokio::spawn(async move {
+            let Ok(stream) = acceptor.accept(stream).await else {
+                return;
+            };
+            let builder = Builder::new(TokioExecutor::new());
+            let connection =
+                builder.serve_connection(TokioIo::new(stream), TowerToHyperService::new(service));
+            let _ = connection.await;
+        });
+    }
 }
 
 async fn health() -> &'static str {

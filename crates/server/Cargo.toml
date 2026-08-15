@@ -7,7 +7,9 @@ repository.workspace = true
 [dependencies]
 axum.workspace = true
 hartig-metrics = { path = "../metrics" }
+hyper-util.workspace = true
 tokio.workspace = true
+tokio-rustls.workspace = true
 
 [dev-dependencies]
 tower.workspace = true
