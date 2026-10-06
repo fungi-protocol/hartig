@@ -1,3 +1,9 @@
+[package]
+name = "pub-sub"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
 [workspace]
 members = ["crates/hartig"]
 resolver = "3"
@@ -16,3 +22,5 @@ unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 unwrap_used = "deny"
+
+[dependencies]
