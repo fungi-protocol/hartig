@@ -24,3 +24,4 @@ unsafe_code = "forbid"
 unwrap_used = "deny"
 
 [dependencies]
+thiserror = "2.0.21"
