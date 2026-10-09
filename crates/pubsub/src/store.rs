@@ -37,3 +37,191 @@ pub trait TopicStore: Send + Sync {
         max: Option<usize>,
     ) -> Result<ReadResult, StoreError>;
 }
+
+/// Checks every `TopicStore` backend must pass. Each backend calls these from its own tests.
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+pub(crate) mod store_contract {
+    use super::{ReadResult, TopicStore};
+    use crate::types::{Seq, TopicId};
+
+    fn topic(n: u8) -> TopicId {
+        TopicId::new([n; 16])
+    }
+
+    fn msg(n: u8) -> Vec<u8> {
+        vec![n; 4]
+    }
+
+    fn read_all(store: &dyn TopicStore, t: &TopicId) -> ReadResult {
+        store.read(t, 0, None).unwrap()
+    }
+
+    pub(crate) fn positions_increase_by_one(store: &dyn TopicStore) {
+        let t = topic(1);
+        for n in 0..3 {
+            assert_eq!(store.append(&t, msg(n)).unwrap(), Seq::from(n));
+        }
+    }
+
+    pub(crate) fn topics_are_isolated(store: &dyn TopicStore) {
+        let (a, b) = (topic(1), topic(2));
+        assert_eq!(store.append(&a, msg(1)).unwrap(), 0);
+        assert_eq!(store.append(&b, msg(2)).unwrap(), 0);
+        assert_eq!(store.append(&a, msg(3)).unwrap(), 1);
+        assert_eq!(store.append(&b, msg(4)).unwrap(), 1);
+
+        let expected_a = ReadResult {
+            messages: vec![msg(1), msg(3)],
+            total_count: 2,
+        };
+        let expected_b = ReadResult {
+            messages: vec![msg(2), msg(4)],
+            total_count: 2,
+        };
+        assert_eq!(read_all(store, &a), expected_a);
+        assert_eq!(read_all(store, &b), expected_b);
+    }
+
+    pub(crate) fn duplicate_is_stored_once(store: &dyn TopicStore) {
+        let t = topic(1);
+        assert_eq!(store.append(&t, msg(1)).unwrap(), 0);
+        assert_eq!(store.append(&t, msg(2)).unwrap(), 1);
+        assert_eq!(store.append(&t, msg(1)).unwrap(), 0);
+        assert_eq!(store.append(&t, msg(2)).unwrap(), 1);
+
+        let expected = ReadResult {
+            messages: vec![msg(1), msg(2)],
+            total_count: 2,
+        };
+        assert_eq!(read_all(store, &t), expected);
+    }
+
+    pub(crate) fn duplicates_are_per_topic(store: &dyn TopicStore) {
+        let (a, b) = (topic(1), topic(2));
+        assert_eq!(store.append(&a, msg(1)).unwrap(), 0);
+        assert_eq!(store.append(&b, msg(1)).unwrap(), 0);
+
+        let expected = ReadResult {
+            messages: vec![msg(1)],
+            total_count: 1,
+        };
+        assert_eq!(read_all(store, &a), expected);
+        assert_eq!(read_all(store, &b), expected);
+    }
+
+    pub(crate) fn read_from_position_returns_newer(store: &dyn TopicStore) {
+        let t = topic(1);
+        for n in 0..4 {
+            store.append(&t, msg(n)).unwrap();
+        }
+
+        let expected = ReadResult {
+            messages: vec![msg(2), msg(3)],
+            total_count: 4,
+        };
+        assert_eq!(store.read(&t, 2, None).unwrap(), expected);
+    }
+
+    pub(crate) fn read_respects_max(store: &dyn TopicStore) {
+        let t = topic(1);
+        for n in 0..4 {
+            store.append(&t, msg(n)).unwrap();
+        }
+
+        let expected = ReadResult {
+            messages: vec![msg(0), msg(1)],
+            total_count: 4,
+        };
+        assert_eq!(store.read(&t, 0, Some(2)).unwrap(), expected);
+        assert_eq!(
+            store.read(&t, 0, Some(usize::MAX)).unwrap(),
+            read_all(store, &t)
+        );
+    }
+
+    pub(crate) fn read_past_end_returns_nothing(store: &dyn TopicStore) {
+        let t = topic(1);
+        for n in 0..4 {
+            store.append(&t, msg(n)).unwrap();
+        }
+
+        let expected = ReadResult {
+            messages: vec![],
+            total_count: 4,
+        };
+        assert_eq!(store.read(&t, 4, None).unwrap(), expected);
+        assert_eq!(store.read(&t, 100, None).unwrap(), expected);
+        assert_eq!(store.read(&t, Seq::MAX, None).unwrap(), expected);
+    }
+
+    pub(crate) fn read_unknown_topic_returns_nothing(store: &dyn TopicStore) {
+        let t = topic(1);
+        let empty = ReadResult {
+            messages: vec![],
+            total_count: 0,
+        };
+        assert_eq!(read_all(store, &t), empty);
+
+        // The topic still starts at 0 after being read. An empty topic created
+        // by the read looks the same through the trait, so each backend checks
+        // "reading creates nothing" in its own tests.
+        assert_eq!(store.append(&t, msg(1)).unwrap(), 0);
+        let expected = ReadResult {
+            messages: vec![msg(1)],
+            total_count: 1,
+        };
+        assert_eq!(read_all(store, &t), expected);
+    }
+
+    pub(crate) fn fan_out(store: &dyn TopicStore) {
+        let t = topic(1);
+        let sent = vec![msg(1), msg(2), msg(3)];
+        for m in &sent {
+            store.append(&t, m.clone()).unwrap();
+        }
+
+        // Alice, Bob and Charlie each pull the topic from the start.
+        for _reader in ["alice", "bob", "charlie"] {
+            assert_eq!(read_all(store, &t).messages, sent);
+        }
+
+        // Bob, caught up at position 3, gets only the new message.
+        store.append(&t, msg(4)).unwrap();
+        let expected = ReadResult {
+            messages: vec![msg(4)],
+            total_count: 4,
+        };
+        assert_eq!(store.read(&t, 3, None).unwrap(), expected);
+    }
+
+    pub(crate) fn concurrent_appends_get_unique_gap_free_positions(store: &dyn TopicStore) {
+        const THREADS: u8 = 8;
+        const PER_THREAD: u8 = 100;
+        let t = topic(1);
+
+        let mut seqs: Vec<Seq> = std::thread::scope(|s| {
+            let handles: Vec<_> = (0..THREADS)
+                .map(|thread| {
+                    s.spawn(move || {
+                        (0..PER_THREAD)
+                            .map(|i| store.append(&t, vec![thread, i]).unwrap())
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .flat_map(|h| h.join().unwrap())
+                .collect()
+        });
+
+        let total = Seq::from(THREADS) * Seq::from(PER_THREAD);
+        seqs.sort_unstable();
+        assert_eq!(seqs, (0..total).collect::<Vec<_>>());
+
+        let all = read_all(store, &t);
+        assert_eq!(all.total_count, total);
+        assert_eq!(all.messages.len() as Seq, total);
+    }
+}
