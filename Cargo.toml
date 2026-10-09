@@ -13,6 +13,7 @@ repository = "https://github.com/fungi-protocol/hartig"
 
 [workspace.dependencies]
 axum = "0.8.9"
+hartig-pubsub = { path = "crates/pubsub" }
 hex = "0.4.3"
 http-body-util = "0.1.5"
 sha2 = "0.11"

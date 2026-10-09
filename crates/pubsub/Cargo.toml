@@ -15,6 +15,7 @@ thiserror.workspace = true
 [dev-dependencies]
 http-body-util.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }
+tower = { workspace = true, features = ["util"] }
 
 [lints]
 workspace = true
