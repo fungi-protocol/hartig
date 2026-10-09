@@ -1,4 +1,6 @@
+use hartig_pubsub::memory::MemoryStore;
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 const ADDR_VAR: &str = "HARTIG_ADDR";
 
@@ -24,7 +26,8 @@ async fn main() {
 }
 
 async fn serve(addr: SocketAddr) -> std::io::Result<()> {
+    let store = Arc::new(MemoryStore::new());
     let listener = tokio::net::TcpListener::bind(addr).await?;
     println!("hartig listening on {}", listener.local_addr()?);
-    axum::serve(listener, hartig::app()).await
+    axum::serve(listener, hartig::app(store)).await
 }

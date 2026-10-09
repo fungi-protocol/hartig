@@ -1,7 +1,15 @@
-use axum::Router;
+//! Hartig: composes its services into one app.
 
-pub fn app() -> Router {
-    Router::new()
+use axum::Router;
+use hartig_pubsub::store::TopicStore;
+use std::sync::Arc;
+
+/// Where the pub-sub service is mounted.
+pub const PUBSUB_PREFIX: &str = "/pubsub";
+
+/// Hartig's full HTTP app: every service mounted at its prefix.
+pub fn app(pubsub_store: Arc<dyn TopicStore>) -> Router {
+    Router::new().nest(PUBSUB_PREFIX, hartig_pubsub::router(pubsub_store))
 }
 
 #[cfg(test)]
@@ -10,14 +18,29 @@ mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
+    use hartig_pubsub::memory::MemoryStore;
+    use hartig_pubsub::types::MESSAGE_SIZE;
     use tower::ServiceExt;
 
+    fn post(path: &str) -> Request<Body> {
+        Request::post(path)
+            .body(Body::from(vec![1; MESSAGE_SIZE]))
+            .unwrap()
+    }
+
     #[tokio::test]
-    async fn unknown_path_is_not_found() {
-        let response = app()
-            .oneshot(Request::get("/unknown").body(Body::empty()).unwrap())
+    async fn pubsub_is_mounted_under_its_prefix() {
+        let app = app(Arc::new(MemoryStore::new()));
+        let topic = "ab".repeat(16);
+
+        let mounted = app
+            .clone()
+            .oneshot(post(&format!("{PUBSUB_PREFIX}/{topic}")))
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(mounted.status(), StatusCode::CREATED);
+
+        let unprefixed = app.oneshot(post(&format!("/{topic}"))).await.unwrap();
+        assert_eq!(unprefixed.status(), StatusCode::NOT_FOUND);
     }
 }
