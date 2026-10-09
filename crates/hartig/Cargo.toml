@@ -1,0 +1,9 @@
+[package]
+name = "hartig"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+axum.workspace = true
+hartig-pubsub.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }

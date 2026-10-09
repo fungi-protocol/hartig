@@ -1,0 +1,15 @@
+[package]
+name = "hartig-pubsub"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+axum.workspace = true
+hex.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+http-body-util.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }
+tower = { workspace = true, features = ["util"] }
