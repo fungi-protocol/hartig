@@ -7,11 +7,6 @@ pub enum StoreError {
     Backend(String),
 }
 
-/// The message's position in its topic, whether this append stored it or an earlier one did.
-///  The only indication of success.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Inserted(pub Seq);
-
 /// Messages read from a topic, plus the topic's length at that moment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadResult {
@@ -27,10 +22,10 @@ pub struct ReadResult {
 /// - Methods are safe to call concurrently; the backend does its own locking.
 /// - Message size is not checked here; the HTTP layer enforces it.
 pub trait TopicStore: Send + Sync {
-    /// Append `message` to `topic`, taking ownership of it.
-    /// - The first append creates the topic, atomically with storing the message.
+    /// Append `message` to `topic`, taking ownership of it, and return its position.
+    /// - The first append creates the topic; until a message is stored, reading it looks the same as reading an unknown topic.
     /// - A duplicate (same bytes, same topic) stores nothing and returns the original position.
-    fn append(&self, topic: &TopicId, message: Vec<u8>) -> Result<Inserted, StoreError>;
+    fn append(&self, topic: &TopicId, message: Vec<u8>) -> Result<Seq, StoreError>;
 
     /// Read up to `max` messages from position `start` (`None` reads to the end).
     /// - Reading past the end, or an unknown topic, returns no messages and is not an error.
