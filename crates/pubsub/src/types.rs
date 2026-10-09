@@ -1,5 +1,9 @@
 use std::{fmt, str::FromStr};
 
+/// Fixed message size in bytes. Current value is just a placeholder
+// TODO: Determine actual message size
+pub const MESSAGE_SIZE: usize = 1024;
+
 /// Topic IDs come from a shared secret, so they are fixed size.
 #[derive(Copy, Clone, Hash, PartialEq, Eq)]
 pub struct TopicId([u8; 16]);
