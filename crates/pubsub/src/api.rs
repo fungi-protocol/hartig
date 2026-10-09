@@ -15,7 +15,7 @@ use crate::store::{AppendResult, StoreError, TopicStore};
 use crate::types::{MESSAGE_SIZE, ParseTopicIdError, Seq, TopicId};
 
 /// Response header carrying a posted message's position, on both 201 and 204.
-const SEQ_HEADER: HeaderName = HeaderName::from_static("hartig-seq");
+pub const SEQ_HEADER: HeaderName = HeaderName::from_static("hartig-seq");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct RangeRequest {
@@ -131,7 +131,7 @@ async fn get_messages(
     // A header that isn't visible ASCII can't be `bytes=...`.
     let header = header.to_str().map_err(|_| RangeError::NoByteRange)?;
     let range = parse_range(header)?;
-    let messages = to_message_range(range, MESSAGE_SIZE)?;
+    let messages = to_message_range(range)?;
 
     let result = store.read(&topic, messages.start, messages.max)?;
     let total = result.total_count.saturating_mul(MESSAGE_SIZE as u64);
@@ -214,8 +214,8 @@ fn parse_number(s: &str) -> Result<u64, RangeError> {
 
 /// Convert a byte range into message positions. The start must fall on a message
 /// boundary; a bounded end is rounded down to whole messages.
-fn to_message_range(range: RangeRequest, message_size: usize) -> Result<MessageRange, RangeError> {
-    let size = message_size as u64;
+fn to_message_range(range: RangeRequest) -> Result<MessageRange, RangeError> {
+    let size = MESSAGE_SIZE as u64;
     if !range.start.is_multiple_of(size) {
         return Err(RangeError::Misaligned);
     }
@@ -351,9 +351,8 @@ mod tests {
         assert_eq!(parse_range("bytes=10-5"), Err(RangeError::EndBeforeStart));
     }
 
-    
     fn messages(start: u64, end: Option<u64>) -> Result<MessageRange, RangeError> {
-        to_message_range(RangeRequest { start, end }, 100)
+        to_message_range(RangeRequest { start, end })
     }
 
     fn message_range(start: Seq, max: Option<usize>) -> Result<MessageRange, RangeError> {
@@ -363,24 +362,32 @@ mod tests {
     #[test]
     fn open_range_reads_to_the_end() {
         assert_eq!(messages(0, None), message_range(0, None));
-        assert_eq!(messages(200, None), message_range(2, None));
+        assert_eq!(messages(2 * SIZE, None), message_range(2, None));
     }
 
     #[test]
     fn bounded_range_counts_whole_messages() {
-        assert_eq!(messages(200, Some(599)), message_range(2, Some(4)));
-        assert_eq!(messages(0, Some(99)), message_range(0, Some(1)));
+        assert_eq!(
+            messages(2 * SIZE, Some(6 * SIZE - 1)),
+            message_range(2, Some(4))
+        );
+        assert_eq!(messages(0, Some(SIZE - 1)), message_range(0, Some(1)));
     }
 
     #[test]
     fn bounded_range_rounds_down() {
-        assert_eq!(messages(200, Some(450)), message_range(2, Some(2)));
-        assert_eq!(messages(0, Some(198)), message_range(0, Some(1)));
+        // Two and a half messages' worth of bytes counts as two.
+        assert_eq!(
+            messages(2 * SIZE, Some(4 * SIZE + SIZE / 2)),
+            message_range(2, Some(2))
+        );
+        // One byte short of two messages counts as one.
+        assert_eq!(messages(0, Some(2 * SIZE - 2)), message_range(0, Some(1)));
     }
 
     #[test]
     fn rejects_misaligned_start() {
-        for start in [1, 99, 150, 201] {
+        for start in [1, SIZE - 1, SIZE + SIZE / 2, 2 * SIZE + 1] {
             assert_eq!(
                 messages(start, None),
                 Err(RangeError::Misaligned),
@@ -392,7 +399,10 @@ mod tests {
     #[test]
     fn rejects_range_smaller_than_one_message() {
         assert_eq!(messages(0, Some(0)), Err(RangeError::TooSmall));
-        assert_eq!(messages(200, Some(298)), Err(RangeError::TooSmall));
+        assert_eq!(
+            messages(2 * SIZE, Some(3 * SIZE - 2)),
+            Err(RangeError::TooSmall)
+        );
     }
 
     #[test]
@@ -425,5 +435,219 @@ mod tests {
         let retry = app.oneshot(post_request(&topic, message)).await.unwrap();
         assert_eq!(retry.status(), StatusCode::NO_CONTENT);
         assert_eq!(retry.headers()[SEQ_HEADER], "0");
+    }
+
+    const SIZE: u64 = MESSAGE_SIZE as u64;
+
+    fn new_app() -> Router {
+        router(Arc::new(MemoryStore::new()))
+    }
+
+    fn topic(n: u8) -> String {
+        hex::encode([n; 32])
+    }
+
+    fn message(n: u8) -> Vec<u8> {
+        vec![n; MESSAGE_SIZE]
+    }
+
+    async fn post(app: &Router, topic: &str, body: Vec<u8>) -> Response {
+        app.clone()
+            .oneshot(post_request(topic, body))
+            .await
+            .unwrap()
+    }
+
+    async fn pull(app: &Router, topic: &str, range: Option<&str>) -> Response {
+        let mut request = Request::get(format!("/{topic}"));
+        if let Some(range) = range {
+            request = request.header(RANGE, range);
+        }
+        let request = request.body(Body::empty()).unwrap();
+        app.clone().oneshot(request).await.unwrap()
+    }
+
+    async fn body_of(response: Response) -> Vec<u8> {
+        response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .to_vec()
+    }
+
+    /// Posts messages `0..count` to `topic`.
+    async fn post_messages(app: &Router, topic: &str, count: u8) {
+        for n in 0..count {
+            let response = post(app, topic, message(n)).await;
+            assert_eq!(response.status(), StatusCode::CREATED);
+            assert_eq!(response.headers()[SEQ_HEADER], n.to_string());
+        }
+    }
+
+    /// The bytes of messages `from..to` back to back, as a 206 body should hold them.
+    fn messages_between(from: u8, to: u8) -> Vec<u8> {
+        (from..to).flat_map(message).collect()
+    }
+
+    #[tokio::test]
+    async fn post_rejects_wrong_size() {
+        let app = new_app();
+        let t = topic(1);
+
+        let short = post(&app, &t, vec![1; 10]).await;
+        assert_eq!(short.status(), StatusCode::BAD_REQUEST);
+        let expected = format!("message must be exactly {MESSAGE_SIZE} bytes, got 10");
+        assert_eq!(body_of(short).await, expected.as_bytes());
+
+        let empty = post(&app, &t, vec![]).await;
+        assert_eq!(empty.status(), StatusCode::BAD_REQUEST);
+
+        let long = post(&app, &t, vec![1; MESSAGE_SIZE + 1]).await;
+        assert_eq!(long.status(), StatusCode::PAYLOAD_TOO_LARGE);
+
+        // Nothing was stored by any of them.
+        let after = pull(&app, &t, Some("bytes=0-")).await;
+        assert_eq!(after.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+    }
+
+    #[tokio::test]
+    async fn post_rejects_invalid_topic() {
+        let app = new_app();
+        let non_hex = "zz".repeat(32);
+        let too_short = "ab".repeat(31);
+        for t in ["abc", too_short.as_str(), non_hex.as_str()] {
+            let response = post(&app, t, message(1)).await;
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{t}");
+        }
+    }
+
+    #[tokio::test]
+    async fn pull_everything() {
+        let app = new_app();
+        let t = topic(1);
+        post_messages(&app, &t, 3).await;
+
+        let response = pull(&app, &t, Some("bytes=0-")).await;
+        assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(response.headers()[CONTENT_TYPE], "application/octet-stream");
+        let expected_range = format!("bytes 0-{}/{}", 3 * SIZE - 1, 3 * SIZE);
+        assert_eq!(response.headers()[CONTENT_RANGE], expected_range.as_str());
+        assert_eq!(body_of(response).await, messages_between(0, 3));
+    }
+
+    #[tokio::test]
+    async fn pull_from_middle_returns_only_newer() {
+        let app = new_app();
+        let t = topic(1);
+        post_messages(&app, &t, 3).await;
+
+        let range = format!("bytes={SIZE}-");
+        let response = pull(&app, &t, Some(&range)).await;
+        assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+        let expected_range = format!("bytes {SIZE}-{}/{}", 3 * SIZE - 1, 3 * SIZE);
+        assert_eq!(response.headers()[CONTENT_RANGE], expected_range.as_str());
+        assert_eq!(body_of(response).await, messages_between(1, 3));
+    }
+
+    #[tokio::test]
+    async fn pull_bounded_range() {
+        let app = new_app();
+        let t = topic(1);
+        post_messages(&app, &t, 3).await;
+
+        let range = format!("bytes=0-{}", 2 * SIZE - 1);
+        let response = pull(&app, &t, Some(&range)).await;
+        assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+        let expected_range = format!("bytes 0-{}/{}", 2 * SIZE - 1, 3 * SIZE);
+        assert_eq!(response.headers()[CONTENT_RANGE], expected_range.as_str());
+        assert_eq!(body_of(response).await, messages_between(0, 2));
+    }
+
+    #[tokio::test]
+    async fn pull_at_end_is_416_with_length() {
+        let app = new_app();
+        let t = topic(1);
+        post_messages(&app, &t, 3).await;
+
+        let range = format!("bytes={}-", 3 * SIZE);
+        let response = pull(&app, &t, Some(&range)).await;
+        assert_eq!(response.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+        let expected_range = format!("bytes */{}", 3 * SIZE);
+        assert_eq!(response.headers()[CONTENT_RANGE], expected_range.as_str());
+        assert!(body_of(response).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn pull_unknown_topic_is_416_with_zero() {
+        let app = new_app();
+        let response = pull(&app, &topic(9), Some("bytes=0-")).await;
+        assert_eq!(response.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+        assert_eq!(response.headers()[CONTENT_RANGE], "bytes */0");
+    }
+
+    #[tokio::test]
+    async fn pull_rejects_bad_ranges() {
+        let app = new_app();
+        let t = topic(1);
+        post_messages(&app, &t, 3).await;
+
+        let misaligned = format!("bytes={}-", SIZE + 1);
+        let end_before_start = format!("bytes={SIZE}-0");
+        let too_small = format!("bytes=0-{}", SIZE - 2);
+        for range in [
+            misaligned.as_str(),
+            "bytes=1-",
+            "items=0-",
+            "0-",
+            "bytes=-100",
+            "bytes=0-1,5-6",
+            "bytes=abc-",
+            end_before_start.as_str(),
+            too_small.as_str(),
+        ] {
+            let response = pull(&app, &t, Some(range)).await;
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{range}");
+        }
+
+        let missing = pull(&app, &t, None).await;
+        assert_eq!(missing.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn offline_client_catches_up_in_one_request() {
+        let app = new_app();
+        let t = topic(1);
+
+        // Alice has read the first two messages, so her cursor is at 2.
+        post_messages(&app, &t, 2).await;
+        let first_read = pull(&app, &t, Some("bytes=0-")).await;
+        assert_eq!(body_of(first_read).await, messages_between(0, 2));
+
+        // Four more arrive while she's offline.
+        for n in 2..6 {
+            assert_eq!(
+                post(&app, &t, message(n)).await.status(),
+                StatusCode::CREATED
+            );
+        }
+
+        // One request from her cursor returns exactly the four she missed.
+        let range = format!("bytes={}-", 2 * SIZE);
+        let catch_up = pull(&app, &t, Some(&range)).await;
+        assert_eq!(catch_up.status(), StatusCode::PARTIAL_CONTENT);
+        let expected_range = format!("bytes {}-{}/{}", 2 * SIZE, 6 * SIZE - 1, 6 * SIZE);
+        assert_eq!(catch_up.headers()[CONTENT_RANGE], expected_range.as_str());
+        let body = body_of(catch_up).await;
+        assert_eq!(body.len(), 4 * MESSAGE_SIZE);
+        assert_eq!(body, messages_between(2, 6));
+
+        // Her cursor is now 6, and the next pull says nothing new.
+        let range = format!("bytes={}-", 6 * SIZE);
+        let again = pull(&app, &t, Some(&range)).await;
+        assert_eq!(again.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+        let expected_range = format!("bytes */{}", 6 * SIZE);
+        assert_eq!(again.headers()[CONTENT_RANGE], expected_range.as_str());
     }
 }

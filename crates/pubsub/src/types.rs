@@ -1,6 +1,7 @@
 use std::{fmt, str::FromStr};
 
 /// Every message is exactly this many bytes.
+/// Still deliberated and might be changed later
 pub const MESSAGE_SIZE: usize = 1024;
 
 /// Topic IDs come from a shared secret, so they are fixed size.
