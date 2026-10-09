@@ -13,6 +13,7 @@ repository = "https://github.com/fungi-protocol/hartig"
 
 [workspace.dependencies]
 axum = "0.8.9"
+hex = "0.4.3"
 sha2 = "0.11"
 thiserror = "2.0.21"
 tokio = "1.53.2"
