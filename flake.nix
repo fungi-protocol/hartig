@@ -31,6 +31,7 @@
         ./nix/toolchain.nix
         ./nix/package.nix
         ./nix/checks.nix
+        ./nix/workflows.nix
         ./nix/devshell.nix
         ./nix/treefmt.nix
       ];
