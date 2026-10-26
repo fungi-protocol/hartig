@@ -1,8 +1,17 @@
-[package]
-name = "pub-sub"
+[workspace]
+members = ["crates/pubsub", "crates/hartig"]
+resolver = "3"
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 
-[dependencies]
+[workspace.dependencies]
+hartig-pubsub = { path = "crates/pubsub" }
+axum = "0.8.9"
+hex = "0.4.3"
+http-body-util = "0.1.5"
 sha2 = "0.10"
 thiserror = "2.0.21"
+tokio = "1.53.2"
+tower = "0.5.3"
