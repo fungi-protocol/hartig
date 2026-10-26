@@ -160,6 +160,7 @@ dependencies = [
  "axum",
  "hartig-pubsub",
  "tokio",
+ "tower",
 ]
 
 [[package]]

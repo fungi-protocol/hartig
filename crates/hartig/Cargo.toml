@@ -7,3 +7,6 @@ edition.workspace = true
 axum.workspace = true
 hartig-pubsub.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
+
+[dev-dependencies]
+tower = { workspace = true, features = ["util"] }
