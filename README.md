@@ -13,7 +13,6 @@ needs ~3–5 per request).
 - **Relay** — forwards encapsulated OHTTP requests to peer gateways (sees
   ciphertext + client metadata, never plaintext).
 - **Gateway / target resources** — terminates OHTTP and serves:
-  - **linked mailboxes** — ephemeral append-only P2P rendezvous slots.
   - **broadcast channels** — per-topic grow-only replayable message sets.
   - **key-consistency service** — multi-path (and optionally attested)
     verification that a gateway is not equivocating on its keys.
