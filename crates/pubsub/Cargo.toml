@@ -1,0 +1,14 @@
+[package]
+name = "hartig-pubsub"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+sha2.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
