@@ -13,7 +13,9 @@
             ];
           }
           ''
-            actionlint "$src/.github/workflows/"*.yml
+            # actionlint 1.7.12 predates GitHub's code-quality permission.
+            actionlint -ignore 'unknown permission scope "code-quality"' \
+              "$src/.github/workflows/"*.yml
             mkdir -p "$out"
           '';
     };

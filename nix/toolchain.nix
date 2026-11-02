@@ -11,16 +11,37 @@
       rustToolchain = pkgs.rust-bin.stable.latest.minimal.override {
         extensions = [
           "clippy"
+          "llvm-tools"
           "rust-analyzer"
           "rust-src"
           "rustfmt"
         ];
       };
       craneLib = (inputs.crane.mkLib pkgs).overrideToolchain rustToolchain;
+      llvmBin = "${rustToolchain}/lib/rustlib/${pkgs.stdenv.hostPlatform.rust.rustcTarget}/bin";
+      # Keep the coverage tool's self-tests on a matching compiler/LLVM pair.
+      cargoLlvmCov =
+        (pkgs.cargo-llvm-cov.override {
+          rustPlatform = pkgs.makeRustPlatform {
+            cargo = rustToolchain;
+            rustc = rustToolchain;
+          };
+        }).overrideAttrs
+          (previous: {
+            env = previous.env // {
+              LLVM_COV = "${llvmBin}/llvm-cov";
+              LLVM_PROFDATA = "${llvmBin}/llvm-profdata";
+            };
+          });
     in
     {
       _module.args = {
-        inherit pkgs rustToolchain craneLib;
+        inherit
+          pkgs
+          rustToolchain
+          craneLib
+          cargoLlvmCov
+          ;
       };
     };
 }

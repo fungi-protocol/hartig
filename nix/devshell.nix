@@ -4,6 +4,7 @@
       config,
       pkgs,
       craneLib,
+      cargoLlvmCov,
       ...
     }:
     {
@@ -11,6 +12,8 @@
         checks = config.checks;
         packages = [
           config.packages.validate-commits
+          cargoLlvmCov
+          pkgs.cargo-nextest
           pkgs.cargo-sort
           pkgs.jujutsu
           pkgs.ripgrep

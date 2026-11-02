@@ -13,10 +13,15 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   checks:
+    permissions:
+      actions: read
+      contents: read
+      code-quality: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+      REPORT_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Compute initial fetch depth
         id: fetch-depth
@@ -41,3 +46,21 @@ jobs:
       - name: Validate commits
         if: github.event_name != 'push'
         run: nix run --no-update-lock-file '.?shallow=1#validate-commits' -- "$BASE_SHA..HEAD"
+      - name: Build the coverage report
+        id: coverage
+        run: |
+          system=$(nix eval --raw --impure --expr builtins.currentSystem)
+          nix build --no-update-lock-file ".?rev=$REPORT_COMMIT&shallow=1#checks.$system.coverage" \
+            --out-link "$RUNNER_TEMP/hartig-coverage"
+          if [[ -f "$RUNNER_TEMP/hartig-coverage/cobertura.xml" ]]; then
+            echo "report=$RUNNER_TEMP/hartig-coverage/cobertura.xml" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Coverage not measured: no Rust tests are available."
+          fi
+      - name: Publish coverage
+        if: steps.coverage.outputs.report != '' && (github.event_name == 'push' || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+        uses: actions/upload-code-coverage@d8e329117199404bba6fc81efe8093dc7c015e34 # v1
+        with:
+          file: ${{ steps.coverage.outputs.report }}
+          language: Rust
+          label: code-coverage/cargo-llvm-cov

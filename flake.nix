@@ -30,6 +30,7 @@
       imports = [
         ./nix/apps/validate-commits
         ./nix/checks/fetch-validation-history.nix
+        ./nix/checks/coverage
         ./nix/toolchain.nix
         ./nix/package.nix
         ./nix/checks.nix
