@@ -24,4 +24,5 @@ unsafe_code = "forbid"
 unwrap_used = "deny"
 
 [dependencies]
+sha2 = "0.10"
 thiserror = "2.0.21"
