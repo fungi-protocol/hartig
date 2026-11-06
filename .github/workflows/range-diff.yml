@@ -1,0 +1,15 @@
+name: Range diff
+on:
+  pull_request_target:
+    types: [synchronize]
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  range-diff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # Keep checkout on the trusted base; never execute the PR's code here.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: fungi-protocol/post-range-diff-comment@2b82922ab197be7b649df277cd9c08bf26b0c07b

@@ -15,14 +15,29 @@ jobs:
   checks:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
     steps:
+      - name: Compute initial fetch depth
+        id: fetch-depth
+        env:
+          PR_COMMITS: ${{ github.event.pull_request.commits || 0 }}
+        run: echo "depth=$((PR_COMMITS + 2))" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: ${{ steps.fetch-depth.outputs.depth }}
+      - name: Fetch validation history
+        if: github.event_name != 'push'
+        run: bash .github/scripts/fetch-validation-history.sh "$BASE_SHA"
       - uses: DeterminateSystems/nix-installer-action@9383ce2bf08796b65508822f5982f49151badc4e
       - uses: Mic92/hestia@dfed9ced335d28978ba74e513939a10db1f71025 # v3.1.0
         with:
           version: v3.1.0
           upstream-cache-filter: true
       - name: Run all checks, including the package build
+        if: github.event_name == 'push'
         run: nix flake check --no-update-lock-file --print-build-logs
+      - name: Validate commits
+        if: github.event_name != 'push'
+        run: nix run --no-update-lock-file '.?shallow=1#validate-commits' -- "$BASE_SHA..HEAD"

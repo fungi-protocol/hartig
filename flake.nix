@@ -28,6 +28,8 @@
         "aarch64-darwin"
       ];
       imports = [
+        ./nix/apps/validate-commits
+        ./nix/checks/fetch-validation-history.nix
         ./nix/toolchain.nix
         ./nix/package.nix
         ./nix/checks.nix
