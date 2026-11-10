@@ -13,5 +13,8 @@ http.workspace = true
 ohttp = { workspace = true, features = ["rust-hpke", "server"] }
 thiserror.workspace = true
 
+[dev-dependencies]
+ohttp = { workspace = true, features = ["rust-hpke", "client", "server"] }
+
 [lints]
 workspace = true
