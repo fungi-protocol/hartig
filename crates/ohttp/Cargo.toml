@@ -1,0 +1,16 @@
+[package]
+name = "hartig-ohttp"
+description = "IO-free RFC 9458 Oblivious HTTP gateway core for Hartig's unary plane"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+bhttp.workspace = true
+http.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
