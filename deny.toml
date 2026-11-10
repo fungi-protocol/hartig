@@ -15,6 +15,10 @@ allow = [
 multiple-versions = "deny"
 wildcards = "deny"
 allow-wildcard-paths = true
+skip = [
+  { crate = "syn@2", reason = "zeroize_derive and curve25519-dalek-derive (via ohttp/hpke) have no syn 3 release yet" },
+  { crate = "winnow@0.7", reason = "toml 0.9 (ohttp build script) uses winnow 0.7 while its toml_parser uses 1.0" },
+]
 
 [sources]
 unknown-registry = "deny"
