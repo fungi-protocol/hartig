@@ -61,6 +61,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bhttp"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b60d03ddf90ae9569b5f5397900b9838f92bd1004e13114f82ebfba0dead6582"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
 name = "block-buffer"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -156,6 +165,15 @@ dependencies = [
  "axum",
  "tokio",
  "tower",
+]
+
+[[package]]
+name = "hartig-ohttp"
+version = "0.1.0"
+dependencies = [
+ "bhttp",
+ "http",
+ "thiserror",
 ]
 
 [[package]]
