@@ -13,5 +13,11 @@ hex.workspace = true
 http.workspace = true
 thiserror.workspace = true
 
+[dev-dependencies]
+axum.workspace = true
+http-body-util.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }
+tower.workspace = true
+
 [lints]
 workspace = true
