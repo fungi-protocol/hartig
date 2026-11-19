@@ -12,6 +12,12 @@ hartig-pubsub.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
 
 [dev-dependencies]
+bytes.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["client", "http1"] }
+hyper-util = { workspace = true, features = ["tokio"] }
+pubsub-client.workspace = true
 tower = { workspace = true, features = ["util"] }
 
 [lints]

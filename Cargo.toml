@@ -18,6 +18,9 @@ hartig-pubsub = { path = "crates/pubsub" }
 hex = "0.4.3"
 http = "1.5.0"
 http-body-util = "0.1.5"
+hyper = "1.12.0"
+hyper-util = "0.1.21"
+pubsub-client = { path = "crates/pubsub-client" }
 sha2 = "0.11"
 thiserror = "2.0.21"
 tokio = "1.53.2"
