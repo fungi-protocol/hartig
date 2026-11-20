@@ -154,6 +154,7 @@ name = "hartig"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "hartig-pubsub",
  "tokio",
  "tower",
 ]
@@ -168,6 +169,7 @@ dependencies = [
  "sha2",
  "thiserror",
  "tokio",
+ "tower",
 ]
 
 [[package]]
