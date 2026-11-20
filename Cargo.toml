@@ -15,6 +15,7 @@ repository = "https://github.com/fungi-protocol/hartig"
 axum = "0.8.9"
 bhttp = { version = "0.8", default-features = false }
 http = "1"
+ohttp = { version = "0.8", default-features = false }
 sha2 = "0.11"
 thiserror = "2.0.21"
 tokio = "1.53.2"
