@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use bytes::Bytes;
+use hartig_pubsub::SEQ_HEADER;
 use hartig_pubsub::types::{MESSAGE_SIZE, Seq, TopicId};
 use http::header::RANGE;
 use http::{Request, StatusCode};
@@ -43,7 +44,8 @@ impl<T: Transport> Client<T> {
         }
     }
 
-    /// Starts reading `topic` from the beginning. Joining again keeps the current position.
+    /// Lets the client post to and pull from `topic`, reading from the beginning.
+    /// Joining again keeps the current position.
     pub fn join(&mut self, topic: &TopicId) {
         self.positions.entry(*topic).or_insert(0);
     }
@@ -84,6 +86,37 @@ impl<T: Transport> Client<T> {
         self.positions
             .insert(*topic, position + messages.len() as Seq);
         Ok(messages)
+    }
+
+    /// Posts `message` to `topic` and returns its seq.
+    /// Posting the same message again stores nothing and returns the same seq, so it is safe to retry.
+    pub async fn publish(
+        &self,
+        topic: &TopicId,
+        message: impl Into<Bytes>,
+    ) -> Result<Seq, ClientError> {
+        if !self.is_joined(topic) {
+            return Err(ClientError::NotJoined);
+        }
+        let message = message.into();
+        if message.len() != MESSAGE_SIZE {
+            return Err(ClientError::WrongMessageSize(message.len()));
+        }
+
+        let request = Request::post(create_url(&self.base_url, topic))
+            .body(message)
+            .map_err(|_| ClientError::InvalidUrl)?;
+        let response = self.transport.send(request).await?;
+
+        if response.status() != StatusCode::CREATED {
+            return Err(ClientError::UnexpectedStatus(response.status()));
+        }
+        response
+            .headers()
+            .get(SEQ_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse().ok())
+            .ok_or(ClientError::BadSeqHeader)
     }
 }
 
@@ -197,7 +230,7 @@ mod tests {
         (app, client)
     }
 
-    /// Posts to the router directly, since the client cannot publish yet.
+    /// Posts to the router directly, bypassing the client.
     async fn post(app: &Router, topic: &TopicId, body: Vec<u8>) {
         let request = Request::post(format!("/{}", hex::encode(topic.as_bytes())))
             .body(Body::from(body))
@@ -288,5 +321,72 @@ mod tests {
             Err(ClientError::WrongBodySize(n)) if n == MESSAGE_SIZE + 1
         ));
         assert_eq!(client.positions[&topic(1)], 0);
+    }
+
+    #[tokio::test]
+    async fn publish_requires_join() {
+        let client = client();
+        assert!(matches!(
+            client.publish(&topic(1), message(0)).await,
+            Err(ClientError::NotJoined)
+        ));
+    }
+
+    #[tokio::test]
+    async fn publish_rejects_wrong_size_without_sending() {
+        let client = joined(NoTransport);
+        assert!(matches!(
+            client.publish(&topic(1), vec![0; MESSAGE_SIZE - 1]).await,
+            Err(ClientError::WrongMessageSize(n)) if n == MESSAGE_SIZE - 1
+        ));
+    }
+
+    #[tokio::test]
+    async fn published_messages_can_be_pulled() {
+        let (_, mut client) = server();
+        client.join(&topic(1));
+
+        assert_eq!(client.publish(&topic(1), message(0)).await.unwrap(), 0);
+        assert_eq!(client.publish(&topic(1), message(1)).await.unwrap(), 1);
+        assert_eq!(
+            client.pull(&topic(1)).await.unwrap(),
+            [message(0), message(1)]
+        );
+    }
+
+    #[tokio::test]
+    async fn publishing_twice_returns_same_seq() {
+        let (_, mut client) = server();
+        client.join(&topic(1));
+
+        assert_eq!(client.publish(&topic(1), message(7)).await.unwrap(), 0);
+        assert_eq!(client.publish(&topic(1), message(7)).await.unwrap(), 0);
+        assert_eq!(client.pull(&topic(1)).await.unwrap(), [message(7)]);
+    }
+
+    #[tokio::test]
+    async fn publish_rejects_unexpected_status() {
+        let client = joined(Canned {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            body: vec![],
+        });
+        assert!(matches!(
+            client.publish(&topic(1), message(0)).await,
+            Err(ClientError::UnexpectedStatus(
+                StatusCode::INTERNAL_SERVER_ERROR
+            ))
+        ));
+    }
+
+    #[tokio::test]
+    async fn publish_rejects_missing_seq_header() {
+        let client = joined(Canned {
+            status: StatusCode::CREATED,
+            body: vec![],
+        });
+        assert!(matches!(
+            client.publish(&topic(1), message(0)).await,
+            Err(ClientError::BadSeqHeader)
+        ));
     }
 }
