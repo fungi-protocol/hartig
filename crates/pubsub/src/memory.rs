@@ -115,3 +115,20 @@ impl TopicStore for MemoryStore {
         Ok(log.read(start, max))
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::MemoryStore;
+    use crate::store::{TopicStore, store_contract::store_contract_tests};
+    use crate::types::TopicId;
+
+    store_contract_tests!(MemoryStore::new());
+
+    #[test]
+    fn read_unknown_topic_creates_nothing() {
+        let store = MemoryStore::new();
+        store.read(&TopicId::new([1; 16]), 0, None).unwrap();
+        assert!(store.topics.read().unwrap().is_empty());
+    }
+}
