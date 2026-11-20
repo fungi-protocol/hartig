@@ -344,11 +344,15 @@ dependencies = [
 name = "pubsub-client"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "bytes",
  "hartig-pubsub",
  "hex",
  "http",
+ "http-body-util",
  "thiserror",
+ "tokio",
+ "tower",
 ]
 
 [[package]]
