@@ -162,9 +162,12 @@ dependencies = [
 name = "hartig-pubsub"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "hex",
+ "http-body-util",
  "sha2",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]
