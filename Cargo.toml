@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/hartig", "crates/pubsub"]
+members = ["crates/hartig", "crates/pubsub", "crates/pubsub-client"]
 resolver = "3"
 
 [workspace.metadata.crane]
@@ -13,8 +13,10 @@ repository = "https://github.com/fungi-protocol/hartig"
 
 [workspace.dependencies]
 axum = "0.8.9"
+bytes = "1.12.1"
 hartig-pubsub = { path = "crates/pubsub" }
 hex = "0.4.3"
+http = "1.5.0"
 http-body-util = "0.1.5"
 sha2 = "0.11"
 thiserror = "2.0.21"
