@@ -1,10 +1,12 @@
 //! The gateway's OHTTP key configuration (RFC 9458 §3) and message sizes.
 
-use http::{HeaderValue, Response, StatusCode, header};
+use http::{Response, StatusCode};
 use ohttp::{
     KeyConfig, SymmetricSuite,
     hpke::{Aead, Kdf, Kem},
 };
+
+use crate::gateway::gateway_response;
 
 /// Gateway KEM: DHKEM(X25519, HKDF-SHA256).
 const KEM: Kem = Kem::X25519Sha256;
@@ -42,7 +44,6 @@ pub const OHTTP_KEYS_MEDIA_TYPE: &str = "application/ohttp-keys";
 /// The gateway's HPKE key pair and its encoded `application/ohttp-keys`.
 #[derive(Debug)]
 pub struct ServerKeyConfig {
-    #[expect(dead_code, reason = "read by the gateway, added in the next commit")]
     pub(crate) server: ohttp::Server,
     encoded_ohttp_keys: Vec<u8>,
 }
@@ -64,23 +65,18 @@ impl ServerKeyConfig {
 
     /// Build a `200 application/ohttp-keys` response with wildcard CORS.
     pub fn ohttp_keys_response(&self) -> Response<Vec<u8>> {
-        let mut response = Response::new(self.encoded_ohttp_keys.clone());
-        *response.status_mut() = StatusCode::OK;
-        let headers = response.headers_mut();
-        headers.insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static(OHTTP_KEYS_MEDIA_TYPE),
-        );
-        headers.insert(
-            header::ACCESS_CONTROL_ALLOW_ORIGIN,
-            HeaderValue::from_static("*"),
-        );
-        response
+        gateway_response(
+            StatusCode::OK,
+            Some(OHTTP_KEYS_MEDIA_TYPE),
+            self.encoded_ohttp_keys.clone(),
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use http::header;
+
     use super::*;
 
     #[test]
