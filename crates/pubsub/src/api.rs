@@ -15,7 +15,7 @@ use crate::store::{StoreError, TopicStore};
 use crate::types::{MESSAGE_SIZE, ParseTopicIdError, Seq, TopicId};
 
 /// Response header carrying a posted message's position.
-const SEQ_HEADER: HeaderName = HeaderName::from_static("hartig-seq");
+pub const SEQ_HEADER: HeaderName = HeaderName::from_static("hartig-seq");
 
 /// Why a `Range` header was rejected
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
@@ -331,5 +331,195 @@ mod tests {
         let retry = app.oneshot(post_request(&topic, message)).await.unwrap();
         assert_eq!(retry.status(), StatusCode::CREATED);
         assert_eq!(retry.headers()[SEQ_HEADER], "0");
+    }
+
+    fn new_app() -> Router {
+        router(Arc::new(MemoryStore::new()))
+    }
+
+    fn topic(n: u8) -> String {
+        hex::encode([n; 16])
+    }
+
+    fn message(n: u8) -> Vec<u8> {
+        vec![n; MESSAGE_SIZE]
+    }
+
+    async fn post(app: &Router, topic: &str, body: Vec<u8>) -> Response {
+        app.clone()
+            .oneshot(post_request(topic, body))
+            .await
+            .unwrap()
+    }
+
+    async fn pull(app: &Router, topic: &str, range: Option<&str>) -> Response {
+        let mut request = Request::get(format!("/{topic}"));
+        if let Some(range) = range {
+            request = request.header(RANGE, range);
+        }
+        let request = request.body(Body::empty()).unwrap();
+        app.clone().oneshot(request).await.unwrap()
+    }
+
+    async fn body_of(response: Response) -> Vec<u8> {
+        response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .to_vec()
+    }
+
+    /// Posts messages `0..count` to `topic`.
+    async fn post_messages(app: &Router, topic: &str, count: u8) {
+        for n in 0..count {
+            let response = post(app, topic, message(n)).await;
+            assert_eq!(response.status(), StatusCode::CREATED);
+            assert_eq!(response.headers()[SEQ_HEADER], n.to_string());
+        }
+    }
+
+    /// The bytes of messages `from..to` back to back, as a 206 body should hold them.
+    fn messages_between(from: u8, to: u8) -> Vec<u8> {
+        (from..to).flat_map(message).collect()
+    }
+
+    #[tokio::test]
+    async fn post_rejects_wrong_size() {
+        let app = new_app();
+        let t = topic(1);
+
+        let short = post(&app, &t, vec![1; 10]).await;
+        assert_eq!(short.status(), StatusCode::BAD_REQUEST);
+        let expected = format!("message must be exactly {MESSAGE_SIZE} bytes, got 10");
+        assert_eq!(body_of(short).await, expected.as_bytes());
+
+        let empty = post(&app, &t, vec![]).await;
+        assert_eq!(empty.status(), StatusCode::BAD_REQUEST);
+
+        let long = post(&app, &t, vec![1; MESSAGE_SIZE + 1]).await;
+        assert_eq!(long.status(), StatusCode::PAYLOAD_TOO_LARGE);
+
+        // Nothing was stored by any of them.
+        let after = pull(&app, &t, Some("0-")).await;
+        assert_eq!(after.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+    }
+
+    #[tokio::test]
+    async fn post_rejects_invalid_topic() {
+        let app = new_app();
+        let non_hex = "zz".repeat(16);
+        let too_short = "ab".repeat(15);
+        for t in ["abc", too_short.as_str(), non_hex.as_str()] {
+            let response = post(&app, t, message(1)).await;
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{t}");
+        }
+    }
+
+    #[tokio::test]
+    async fn pull_everything() {
+        let app = new_app();
+        let t = topic(1);
+        post_messages(&app, &t, 3).await;
+
+        let response = pull(&app, &t, Some("0-")).await;
+        assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(response.headers()[CONTENT_TYPE], "application/octet-stream");
+        assert_eq!(response.headers()[CONTENT_RANGE], "0-2/3");
+        assert_eq!(body_of(response).await, messages_between(0, 3));
+    }
+
+    #[tokio::test]
+    async fn pull_from_middle_returns_only_newer() {
+        let app = new_app();
+        let t = topic(1);
+        post_messages(&app, &t, 3).await;
+
+        let response = pull(&app, &t, Some("1-")).await;
+        assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(response.headers()[CONTENT_RANGE], "1-2/3");
+        assert_eq!(body_of(response).await, messages_between(1, 3));
+    }
+
+    #[tokio::test]
+    async fn pull_bounded_range() {
+        let app = new_app();
+        let t = topic(1);
+        post_messages(&app, &t, 3).await;
+
+        let response = pull(&app, &t, Some("0-1")).await;
+        assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(response.headers()[CONTENT_RANGE], "0-1/3");
+        assert_eq!(body_of(response).await, messages_between(0, 2));
+    }
+
+    #[tokio::test]
+    async fn pull_at_end_is_416_with_length() {
+        let app = new_app();
+        let t = topic(1);
+        post_messages(&app, &t, 3).await;
+
+        let response = pull(&app, &t, Some("3-")).await;
+        assert_eq!(response.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+        assert_eq!(response.headers()[CONTENT_RANGE], "*/3");
+        assert!(body_of(response).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn pull_unknown_topic_is_416_with_zero() {
+        let app = new_app();
+        let response = pull(&app, &topic(9), Some("0-")).await;
+        assert_eq!(response.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+        assert_eq!(response.headers()[CONTENT_RANGE], "*/0");
+    }
+
+    #[tokio::test]
+    async fn pull_rejects_bad_ranges() {
+        let app = new_app();
+        let t = topic(1);
+        post_messages(&app, &t, 3).await;
+
+        for range in [
+            "1-0", "bytes=0-", "items=0-", "-1", "0-1,5-6", "abc-", "5", "1-2-3",
+        ] {
+            let response = pull(&app, &t, Some(range)).await;
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{range}");
+        }
+
+        let missing = pull(&app, &t, None).await;
+        assert_eq!(missing.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn offline_client_catches_up_in_one_request() {
+        let app = new_app();
+        let t = topic(1);
+
+        // Alice has read the first two messages, so her cursor is at 2.
+        post_messages(&app, &t, 2).await;
+        let first_read = pull(&app, &t, Some("0-")).await;
+        assert_eq!(body_of(first_read).await, messages_between(0, 2));
+
+        // Four more arrive while she's offline.
+        for n in 2..6 {
+            assert_eq!(
+                post(&app, &t, message(n)).await.status(),
+                StatusCode::CREATED
+            );
+        }
+
+        // One request from her cursor returns exactly the four she missed.
+        let catch_up = pull(&app, &t, Some("2-")).await;
+        assert_eq!(catch_up.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(catch_up.headers()[CONTENT_RANGE], "2-5/6");
+        let body = body_of(catch_up).await;
+        assert_eq!(body.len(), 4 * MESSAGE_SIZE);
+        assert_eq!(body, messages_between(2, 6));
+
+        // Her cursor is now 6, and the next pull says nothing new.
+        let again = pull(&app, &t, Some("6-")).await;
+        assert_eq!(again.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+        assert_eq!(again.headers()[CONTENT_RANGE], "*/6");
     }
 }
